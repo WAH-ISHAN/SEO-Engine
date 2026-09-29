@@ -10,7 +10,7 @@ try {
   config.crawl.maxPages = input.maxPages;
   config.crawl.concurrency = 2;
   config.crawl.allowedOrigins = [new URL(input.url).origin];
-  const result = await runAudit(config, { profile: 'on-page' });
+  const result = await runAudit(config, { profiles: input.profiles });
   result.store.close();
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

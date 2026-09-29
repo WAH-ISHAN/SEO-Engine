@@ -47,4 +47,5 @@ export { VALIDATORS, ADVISORY_RULES } from './validation-engine/validators.js';
 export { MonitoringEngine, type SiteSnapshot, type MonitoringDiff } from './monitoring-engine/monitoring-engine.js';
 export { buildScoreReport, type ScoreReport } from './analytics/scoring.js';
 
-export { runAudit, ANALYSIS_ENGINES, type AuditResult } from './pipeline/pipeline.js';
+export { runAudit, ANALYSIS_ENGINES, OPTIMIZATION_PROFILES, type AuditResult, type OptimizationProfile } from './pipeline/pipeline.js';
+export { OptimizationEngine, SDK_PROFILES, type OptimizationEngineOptions, type SdkProfile, type StartAuditInput } from './sdk/client.js';

@@ -1,10 +1,10 @@
 # Architecture
 
 The current product is headless: `src/service/api.ts` owns project credentials and
-durable audit jobs, `src/service/worker.ts` runs the on-page profile, and
-`plugins/on-page-seo/mcp-server.mjs` exposes the REST workflow through stdio MCP.
-The dashboard was removed. See [integration](INTEGRATION.md) for setup and assignment.
-The broader analysis model below remains available to library consumers.
+durable audit jobs, `src/service/worker.ts` runs selected SEO/AEO/AIO/GEO profiles,
+and `plugins/search-optimization/mcp-server.mjs` exposes the REST workflow through
+stdio MCP. The dashboard was removed. See [integration](INTEGRATION.md) for setup and
+assignment.
 
 This document covers the decisions that hold the platform together, and how to extend it
 without breaking them.

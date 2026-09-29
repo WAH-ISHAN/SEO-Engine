@@ -46,7 +46,10 @@ test('project API and real stdio MCP complete an isolated on-page audit', { time
       args: [fileURLToPath(new URL('../../plugins/on-page-seo/mcp-server.mjs', import.meta.url))],
       env: { ...process.env as Record<string, string>, SEO_API_URL: base, SEO_API_KEY: key }, stderr: 'pipe',
     }));
-    assert.equal((await client.listTools()).tools.length, 5);
+    const tools = (await client.listTools()).tools.map(t => t.name);
+    assert.ok(tools.includes('optimization_start_audit'));
+    assert.ok(tools.includes('optimization_get_geo_report'));
+    assert.ok(tools.includes('seo_start_audit'));
     const assigned = await client.callTool({ name: 'seo_list_projects', arguments: {} });
     assert.equal(JSON.stringify(assigned).includes(key), false);
     const start = await client.callTool({ name: 'seo_start_audit', arguments: { projectId: 'one', maxPages: 20 } });

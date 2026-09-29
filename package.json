@@ -1,7 +1,7 @@
 {
   "name": "uwoe",
   "version": "1.0.0",
-  "description": "Headless on-page SEO engine with project-scoped REST API and MCP plugin.",
+  "description": "Headless Search Optimization Engine for SEO, AEO, AIO and GEO, exposed through REST API, MCP and SDK integrations.",
   "type": "module",
   "bin": {
     "uwoe": "./dist/src/cli.js"
@@ -15,7 +15,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "mcp": "node plugins/on-page-seo/mcp-server.mjs",
+    "mcp": "node plugins/search-optimization/mcp-server.mjs",
     "build": "tsc -p tsconfig.json && npm run copy:fixtures",
     "watch": "tsc -p tsconfig.json --watch",
     "clean": "node scripts/clean.mjs",

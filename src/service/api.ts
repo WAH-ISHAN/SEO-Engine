@@ -24,8 +24,14 @@ export const projectsSchema = z.array(projectSchema).min(1).superRefine((items, 
 });
 type Project = z.infer<typeof projectSchema>;
 type Job = { id: string; projectId: string; status: 'running' | 'completed' | 'failed';
-  startedAt: string; completedAt: string | null; error: string | null; maxPages: number };
-const auditInput = z.object({ maxPages: z.number().int().min(1).max(500).optional() }).strict();
+  startedAt: string; completedAt: string | null; error: string | null; maxPages: number; profiles: OptimizationProfile[] };
+const optimizationProfile = z.enum(['seo', 'aeo', 'aio', 'geo']);
+type OptimizationProfile = z.infer<typeof optimizationProfile>;
+const defaultProfiles: OptimizationProfile[] = ['seo', 'aeo', 'aio', 'geo'];
+const auditInput = z.object({
+  maxPages: z.number().int().min(1).max(500).optional(),
+  profiles: z.array(optimizationProfile).min(1).max(4).optional(),
+}).strict();
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export function createApi(projects: Project[], dataDir: string, timeoutMs = 600_000) {
@@ -44,20 +50,20 @@ export function createApi(projects: Project[], dataDir: string, timeoutMs = 600_
     const dir = join(dataDir, project.id, 'jobs');
     mkdirSync(dir, { recursive: true });
     return readdirSync(dir).filter(id => uuid.test(id)).map(id =>
-      JSON.parse(readFileSync(join(dir, id, 'job.json'), 'utf8')) as Job
+      ({ profiles: ['seo'] as OptimizationProfile[], ...JSON.parse(readFileSync(join(dir, id, 'job.json'), 'utf8')) }) as Job
     ).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }
   for (const p of projects) for (const job of jobs(p)) {
     if (job.status === 'running') save({ ...job, status: 'failed', completedAt: new Date().toISOString(), error: 'Service stopped before audit completed. Start a new audit.' });
   }
-  function start(project: Project, maxPages: number): Job {
+  function start(project: Project, maxPages: number, profiles: OptimizationProfile[]): Job {
     const id = randomUUID();
     const directory = jobDir(project.id, id);
     mkdirSync(directory, { recursive: true });
-    const job: Job = { id, projectId: project.id, status: 'running', startedAt: new Date().toISOString(), completedAt: null, error: null, maxPages };
+    const job: Job = { id, projectId: project.id, status: 'running', startedAt: new Date().toISOString(), completedAt: null, error: null, maxPages, profiles };
     save(job);
     const inputFile = join(directory, 'input.json');
-    writeFileSync(inputFile, JSON.stringify({ url: project.url, maxPages,
+    writeFileSync(inputFile, JSON.stringify({ url: project.url, maxPages, profiles,
       dbPath: join(dataDir, project.id, 'graph.db'), rawDir: join(directory, 'raw'), outDir: join(directory, 'out') }));
     const child = spawn(process.execPath, [fileURLToPath(new URL('./worker.js', import.meta.url)), inputFile], {
       stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true,
@@ -92,28 +98,37 @@ export function createApi(projects: Project[], dataDir: string, timeoutMs = 600_
         const { apiKey: _key, ...visible } = project;
         return send(res, 200, { projects: [visible] });
       }
-      const match = /^\/v1\/projects\/([a-z0-9-]+)\/(audits|report)(?:\/([0-9a-f-]+)(\/report)?)?$/.exec(path);
+      const match = /^\/v1\/projects\/([a-z0-9-]+)(?:\/(.*))?$/.exec(path);
       if (!match || match[1] !== project.id) return send(res, 404, { error: 'Not found' });
-      const [, , resource, id, reportSuffix] = match;
-      if (id && !uuid.test(id)) return send(res, 404, { error: 'Not found' });
-      if (req.method === 'POST' && resource === 'audits' && !id) {
+      const tail = match[2] ?? '';
+      const parts = tail.split('/').filter(Boolean);
+      if (req.method === 'POST' && parts.length === 1 && parts[0] === 'audits') {
         const parsed = auditInput.safeParse(await body(req));
-        if (!parsed.success) return send(res, 422, { error: 'Expected {maxPages?: integer 1..500}; extra fields are not allowed' });
+        if (!parsed.success) return send(res, 422, { error: 'Expected {profiles?: ["seo"|"aeo"|"aio"|"geo"][], maxPages?: integer 1..500}; extra fields are not allowed' });
         const maxPages = parsed.data.maxPages ?? project.maxPages;
+        const profiles = [...new Set(parsed.data.profiles ?? defaultProfiles)];
         if (maxPages > project.maxPages) return send(res, 422, { error: `Project page limit is ${project.maxPages}` });
         if (stopping || children.size >= 2 || children.has(project.id)) return send(res, 409, { error: 'Audit capacity busy; retry later' });
-        return send(res, 202, start(project, maxPages));
+        return send(res, 202, start(project, maxPages, profiles));
       }
       if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
-      if (resource === 'report' && id) return send(res, 404, { error: 'Not found' });
       const all = jobs(project);
-      if (resource === 'audits' && !id) return send(res, 200, { audits: all });
+      if (parts.length === 1 && parts[0] === 'audits') return send(res, 200, { audits: all });
+      const legacyLatest = parts.length === 1 && parts[0] === 'report';
+      const reportSections = new Set(['seo', 'aeo', 'aio', 'geo', 'entities', 'recommendations', 'schema']);
+      const latestReport = (parts.length === 2 || (parts.length === 3 && reportSections.has(parts[2]))) && parts[0] === 'reports' && parts[1] === 'latest';
+      const auditStatus = parts.length === 2 && parts[0] === 'audits';
+      const auditReport = parts.length === 3 && parts[0] === 'audits' && parts[2] === 'report';
+      const id = auditStatus || auditReport ? parts[1] : null;
+      if (id && !uuid.test(id)) return send(res, 404, { error: 'Not found' });
+      if (!legacyLatest && !latestReport && !auditStatus && !auditReport) return send(res, 404, { error: 'Not found' });
       const job = id ? all.find(j => j.id === id) : all.find(j => j.status === 'completed');
       if (!job) return send(res, 404, { error: 'Audit/report not found' });
-      if (resource === 'audits' && !reportSuffix) return send(res, 200, job);
+      if (auditStatus) return send(res, 200, job);
       if (job.status !== 'completed') return send(res, 409, { error: 'Report is not ready', audit: job });
       const report = JSON.parse(readFileSync(join(jobDir(project.id, job.id), 'out', 'report.json'), 'utf8'));
-      return send(res, 200, { projectId: project.id, auditId: job.id, report });
+      const section = latestReport ? parts[2] : undefined;
+      return send(res, 200, { projectId: project.id, auditId: job.id, report: selectReportSection(report, section) });
     } catch (e) {
       if (e instanceof RequestError) return send(res, e.status, { error: e.message });
       console.error('API request failed', e);
@@ -136,6 +151,22 @@ function equal(a: string, b: string) {
 function send(res: ServerResponse, status: number, payload: unknown) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(JSON.stringify(payload));
+}
+function selectReportSection(report: any, section: string | undefined) {
+  if (!section) return report;
+  if (['seo', 'aeo', 'aio', 'geo'].includes(section)) {
+    const profile = report.analysis?.profiles?.[section];
+    return profile ?? { summary: { pages: report.observed?.coverage?.pagesCrawled ?? 0, issues: 0, recommendations: 0 }, issues: [], recommendations: [] };
+  }
+  if (section === 'entities') return report.observed?.entityGraph?.entities ?? [];
+  if (section === 'recommendations') return report.analysis?.recommendations ?? [];
+  if (section === 'schema') return {
+    typesInUse: report.observed?.entityGraph?.stats?.schemaTypesInUse ?? report.observed?.coverage?.schemaTypesInUse ?? report.observed?.keyFacts?.schemaTypesInUse ?? [],
+    structuredDataScore: report.analysis?.scores?.structuredData ?? null,
+    issues: (report.observed?.issues ?? []).filter((issue: any) => issue.category === 'STRUCTURED_DATA'),
+    recommendations: (report.analysis?.recommendations ?? []).filter((rec: any) => rec.category === 'STRUCTURED_DATA'),
+  };
+  return report;
 }
 class RequestError extends Error { constructor(public status: number, message: string) { super(message); } }
 function body(req: IncomingMessage): Promise<unknown> {

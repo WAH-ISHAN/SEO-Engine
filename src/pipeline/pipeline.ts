@@ -40,6 +40,9 @@ export const ANALYSIS_ENGINES: AnalysisEngine[] = [
   seoEngine, schemaEngine, internalLinkEngine, aeoEngine, aioEngine, geoEngine,
 ];
 
+export const OPTIMIZATION_PROFILES = ['seo', 'aeo', 'aio', 'geo'] as const;
+export type OptimizationProfile = (typeof OPTIMIZATION_PROFILES)[number];
+
 export interface AuditResult {
   context: AnalysisContext;
   signals: Signal[];
@@ -57,6 +60,9 @@ export interface AuditOptions {
   existingCrawl?: CrawlResult;
   /** Skip writing the JSON report. */
   skipReports?: boolean;
+  /** Public API profiles to evaluate. Defaults to every profile. */
+  profiles?: OptimizationProfile[];
+  /** Legacy alias for SEO-only service runs. */
   profile?: 'full' | 'on-page';
   logger?: Logger;
 }
@@ -64,6 +70,7 @@ export interface AuditOptions {
 export async function runAudit(config: PlatformConfig, opts: AuditOptions = {}): Promise<AuditResult> {
   const log = opts.logger ?? createLogger(config.logLevel);
   const started = Date.now();
+  const profiles = normalizeProfiles(opts);
 
   // ---- 1. Discover -------------------------------------------------------
   log.info('phase 1/8: discovery');
@@ -101,11 +108,11 @@ export async function runAudit(config: PlatformConfig, opts: AuditOptions = {}):
   // ---- 5. Analyze --------------------------------------------------------
   log.info('phase 5/8: analysis');
   const signals: Signal[] = [];
-  const engines = opts.profile === 'on-page' ? [seoEngine, schemaEngine, internalLinkEngine] : ANALYSIS_ENGINES;
+  const engines = enginesForProfiles(profiles);
   for (const engine of engines) {
     try {
       const produced = engine.analyze(context);
-      signals.push(...produced.filter(s => opts.profile !== 'on-page' || ON_PAGE_CATEGORIES.has(s.category)));
+      signals.push(...produced.filter(s => categoriesForProfiles(profiles).has(s.category)));
       log.info(`  ${engine.name}: ${produced.length} signal(s)`);
     } catch (err) {
       if (opts.profile === 'on-page') {
@@ -139,7 +146,7 @@ export async function runAudit(config: PlatformConfig, opts: AuditOptions = {}):
   if (!opts.skipReports) {
     mkdirSync(config.outDir, { recursive: true });
     const jsonPath = join(config.outDir, 'report.json');
-    writeFileSync(jsonPath, JSON.stringify(serializeReport(context, recommendations, scores, snapshot, diff, changes, opts.profile), null, 2), 'utf8');
+    writeFileSync(jsonPath, JSON.stringify(serializeReport(context, recommendations, scores, snapshot, diff, changes, profiles), null, 2), 'utf8');
     outputs.json = jsonPath;
 
     outputs.artifacts = implementation.exportArtifacts(changes, config.outDir);
@@ -162,15 +169,18 @@ export function serializeReport(
   snapshot: SiteSnapshot,
   diff: MonitoringDiff | null,
   changes: Change[],
-  profile: 'full' | 'on-page' = 'full',
+  profiles: OptimizationProfile[] = [...OPTIMIZATION_PROFILES],
 ): Record<string, unknown> {
+  const categories = categoriesForProfiles(profiles);
+  const full = profiles.length === OPTIMIZATION_PROFILES.length;
   return {
     meta: {
       generatedAt: new Date().toISOString(),
       site: ctx.site.origin,
       generator: 'Unified Website Optimization Engine 1.0',
-      profile,
-      categories: profile === 'on-page' ? [...ON_PAGE_CATEGORIES] : 'all',
+      profile: profiles.length === 1 && profiles[0] === 'seo' ? 'on-page' : full ? 'full' : 'custom',
+      profiles,
+      categories: full ? 'all' : [...categories],
       scoreDisclaimer: scores.disclaimer,
     },
     observed: {
@@ -225,8 +235,10 @@ export function serializeReport(
       graphCounts: ctx.store.counts(),
     },
     analysis: {
-      scores: profile === 'on-page' ? { onPage: scores.scores.onPage, content: scores.scores.content, internalLinking: scores.scores.internalLinking, structuredData: scores.scores.structuredData, accessibility: scores.scores.accessibility } : scores.scores,
-      breakdown: scores.breakdown.filter(b => profile !== 'on-page' || ON_PAGE_CATEGORIES.has(b.category)),
+      summary: buildUnifiedSummary(ctx, recs, scores, profiles),
+      profiles: buildProfileReports(ctx, recs, scores, profiles),
+      scores: full ? scores.scores : scoresForProfiles(scores, profiles),
+      breakdown: scores.breakdown.filter(b => categories.has(b.category)),
       recommendations: recs.recommendations,
       queue: recs.queue.map((r) => r.id),
       stats: recs.stats,
@@ -235,11 +247,85 @@ export function serializeReport(
     monitoring: {
       snapshotId: snapshot.id,
       totals: snapshot.totals,
-      diff: profile === 'on-page' && diff ? { ...diff, scoreDeltas: Object.fromEntries(
-        Object.entries(diff.scoreDeltas).filter(([key]) => ['onPage', 'content', 'internalLinking', 'structuredData', 'accessibility'].includes(key)),
+      diff: !full && diff ? { ...diff, scoreDeltas: Object.fromEntries(
+        Object.entries(diff.scoreDeltas).filter(([key]) => Object.keys(scoresForProfiles(scores, profiles)).includes(key)),
       ) } : diff,
     },
   };
 }
 
 export const ON_PAGE_CATEGORIES = new Set(['ON_PAGE_SEO', 'CONTENT', 'INTERNAL_LINKING', 'STRUCTURED_DATA', 'ACCESSIBILITY']);
+
+const PROFILE_CATEGORIES: Record<OptimizationProfile, Set<string>> = {
+  seo: new Set(['TECHNICAL_SEO', 'ON_PAGE_SEO', 'CONTENT', 'INFORMATION_ARCHITECTURE', 'INTERNAL_LINKING', 'STRUCTURED_DATA', 'PERFORMANCE', 'ACCESSIBILITY']),
+  aeo: new Set(['AEO', 'CONTENT', 'ENTITY', 'STRUCTURED_DATA']),
+  aio: new Set(['AIO', 'CONTENT', 'ENTITY', 'STRUCTURED_DATA', 'ACCESSIBILITY']),
+  geo: new Set(['GEO', 'CONTENT', 'ENTITY', 'STRUCTURED_DATA']),
+};
+
+const PROFILE_SCORE_KEYS: Record<OptimizationProfile, string[]> = {
+  seo: ['overall', 'technicalSeo', 'onPage', 'content', 'architecture', 'internalLinking', 'structuredData', 'accessibility', 'performance'],
+  aeo: ['overall', 'aeo', 'content', 'entity', 'structuredData'],
+  aio: ['overall', 'aio', 'content', 'entity', 'structuredData', 'accessibility'],
+  geo: ['overall', 'geo', 'content', 'entity', 'structuredData'],
+};
+
+function normalizeProfiles(opts: AuditOptions): OptimizationProfile[] {
+  if (opts.profile === 'on-page') return ['seo'];
+  const requested = opts.profiles?.length ? opts.profiles : [...OPTIMIZATION_PROFILES];
+  return [...new Set(requested)].filter((p): p is OptimizationProfile => (OPTIMIZATION_PROFILES as readonly string[]).includes(p));
+}
+
+function enginesForProfiles(profiles: OptimizationProfile[]): AnalysisEngine[] {
+  const engines = new Set<AnalysisEngine>();
+  if (profiles.includes('seo')) {
+    engines.add(seoEngine);
+    engines.add(schemaEngine);
+    engines.add(internalLinkEngine);
+  }
+  if (profiles.includes('aeo')) engines.add(aeoEngine);
+  if (profiles.includes('aio')) engines.add(aioEngine);
+  if (profiles.includes('geo')) engines.add(geoEngine);
+  return [...engines];
+}
+
+function categoriesForProfiles(profiles: OptimizationProfile[]) {
+  const categories = new Set<string>();
+  for (const profile of profiles) for (const category of PROFILE_CATEGORIES[profile]) categories.add(category);
+  return categories;
+}
+
+function scoresForProfiles(scores: ScoreReport, profiles: OptimizationProfile[]) {
+  const keys = new Set<string>();
+  for (const profile of profiles) for (const key of PROFILE_SCORE_KEYS[profile]) keys.add(key);
+  return Object.fromEntries(Object.entries(scores.scores).filter(([key]) => keys.has(key)));
+}
+
+function buildUnifiedSummary(ctx: AnalysisContext, recs: RecommendationResult, scores: ScoreReport, profiles: OptimizationProfile[]) {
+  return {
+    pages: ctx.site.pages.length,
+    issues: recs.issues.length,
+    recommendations: recs.recommendations.length,
+    profiles,
+    scores: scoresForProfiles(scores, profiles),
+  };
+}
+
+function buildProfileReports(ctx: AnalysisContext, recs: RecommendationResult, scores: ScoreReport, profiles: OptimizationProfile[]) {
+  return Object.fromEntries(profiles.map((profile) => {
+    const categories = PROFILE_CATEGORIES[profile];
+    const issues = recs.issues.filter((issue) => categories.has(issue.category));
+    const recommendations = recs.recommendations.filter((rec) => categories.has(rec.category));
+    return [profile, {
+      summary: {
+        pages: ctx.site.pages.length,
+        issues: issues.length,
+        recommendations: recommendations.length,
+        scores: scoresForProfiles(scores, [profile]),
+      },
+      breakdown: scores.breakdown.filter((b) => categories.has(b.category)),
+      issues,
+      recommendations,
+    }];
+  }));
+}
