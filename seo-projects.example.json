@@ -1,0 +1,9 @@
+[
+  {
+    "id": "client-website",
+    "name": "Client Website",
+    "url": "https://example.com",
+    "apiKey": "replace-with-a-random-key-at-least-32-characters",
+    "maxPages": 100
+  }
+]

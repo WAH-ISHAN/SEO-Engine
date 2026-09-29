@@ -1,0 +1,37 @@
+{
+  "name": "uwoe",
+  "version": "1.0.0",
+  "description": "Headless on-page SEO engine with project-scoped REST API and MCP plugin.",
+  "type": "module",
+  "bin": {
+    "uwoe": "./dist/src/cli.js"
+  },
+  "main": "./dist/src/index.js",
+  "exports": {
+    ".": "./dist/src/index.js"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "mcp": "node plugins/on-page-seo/mcp-server.mjs",
+    "build": "tsc -p tsconfig.json && npm run copy:fixtures",
+    "watch": "tsc -p tsconfig.json --watch",
+    "clean": "node scripts/clean.mjs",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "uwoe": "node dist/src/cli.js",
+    "copy:fixtures": "node scripts/copy-fixtures.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "google-auth-library": "^11.1.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.0"
+  },
+  "license": "MIT",
+  "private": true
+}

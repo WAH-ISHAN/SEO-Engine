@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /internal/
+
+Sitemap: http://127.0.0.1:8799/sitemap.xml

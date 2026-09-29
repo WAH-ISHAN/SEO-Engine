@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "on-page-seo": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server.mjs"]
+    }
+  }
+}

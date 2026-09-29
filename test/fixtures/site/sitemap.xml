@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>http://127.0.0.1:8799/</loc></url>
+  <url><loc>http://127.0.0.1:8799/services</loc></url>
+  <url><loc>http://127.0.0.1:8799/services/boundary-survey</loc></url>
+  <url><loc>http://127.0.0.1:8799/services/topographic-survey</loc></url>
+  <url><loc>http://127.0.0.1:8799/blog/choosing-a-surveyor</loc></url>
+  <url><loc>http://127.0.0.1:8799/blog/surveyor-guide</loc></url>
+  <url><loc>http://127.0.0.1:8799/faq</loc></url>
+  <url><loc>http://127.0.0.1:8799/orphan-guide</loc></url>
+  <url><loc>http://127.0.0.1:8799/about</loc></url>
+  <url><loc>http://127.0.0.1:8799/pricing</loc></url>
+</urlset>

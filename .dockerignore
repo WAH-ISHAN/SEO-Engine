@@ -1,0 +1,8 @@
+node_modules
+dist
+.seo-data
+.uwoe
+.tmp-validation
+seo-projects.json
+.env
+*.log
